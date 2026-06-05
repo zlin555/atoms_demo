@@ -1,0 +1,11 @@
+{
+  "name": "atoms-demo-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install:frontend": "cd atoms-frontend && npm install",
+    "build": "cd atoms-frontend && npm run build",
+    "dev": "cd atoms-frontend && npm run dev",
+    "preview": "cd atoms-frontend && npm run preview"
+  }
+}
