@@ -1,3 +1,14 @@
+---
+title: Atoms Agent Demo Backend
+emoji: ⚛️
+colorFrom: green
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: FastAPI backend for an Atoms-style agent app builder demo.
+---
+
 # Atoms Agent Demo Backend
 
 FastAPI backend for the Atoms-style agent builder demo.
