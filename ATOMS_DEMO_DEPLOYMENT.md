@@ -71,3 +71,23 @@ Create `atoms-frontend/.env.local`:
 ```bash
 VITE_API_BASE_URL=http://localhost:7860
 ```
+
+## AI Provider Variables
+
+The backend now supports real AI generation through an OpenAI-compatible chat completions API.
+
+Set these variables in your Hugging Face Space:
+
+```bash
+AI_API_BASE_URL=https://api.openai.com/v1
+AI_API_KEY=your_api_key
+AI_MODEL=gpt-4o-mini
+```
+
+The backend calls:
+
+```bash
+{AI_API_BASE_URL}/chat/completions
+```
+
+If you have an official Atoms API endpoint and token, use those values here. The public `https://atoms.dev/dashboard` web page itself is not a stable API endpoint.

@@ -210,7 +210,15 @@ function App() {
     try {
       const data = await api("/api/builds", {
         method: "POST",
-        body: JSON.stringify({ prompt: userText, template_id: templateId, mode }),
+        body: JSON.stringify({
+          prompt: userText,
+          template_id: templateId,
+          mode,
+          history: messages.slice(-8).map((message) => ({
+            role: message.role === "assistant" ? "assistant" : "user",
+            content: message.text,
+          })),
+        }),
       });
       const nextBuild = data.build;
       setBuild(nextBuild);

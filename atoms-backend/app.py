@@ -3,12 +3,14 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import time
 import uuid
 import zipfile
 from datetime import datetime, timezone
 from typing import Literal
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -23,6 +25,7 @@ class BuildRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=1200)
     template_id: TemplateId = "crm"
     mode: BuildMode = "fast"
+    history: list[dict[str, str]] = Field(default_factory=list)
 
 
 class RerunRequest(BaseModel):
@@ -91,6 +94,11 @@ PROJECTS = [
 BUILDS: dict[str, dict] = {}
 PUBLISHED: dict[str, dict] = {}
 
+AI_API_BASE_URL = os.getenv("AI_API_BASE_URL", "").rstrip("/")
+AI_API_KEY = os.getenv("AI_API_KEY", "")
+AI_MODEL = os.getenv("AI_MODEL", "gpt-4o-mini")
+AI_TIMEOUT_SECONDS = float(os.getenv("AI_TIMEOUT_SECONDS", "40"))
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -135,7 +143,163 @@ export default function {component_name}() {{
 """
 
 
-def make_build(prompt: str, template_id: TemplateId, mode: BuildMode, source: str = "chat") -> dict:
+def extract_json_object(text: str) -> dict | None:
+    """Parse strict JSON first, then recover JSON wrapped in markdown fences."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
+    if fenced:
+        try:
+            return json.loads(fenced.group(1))
+        except json.JSONDecodeError:
+            return None
+
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+def normalize_cards(value: object, fallback_cards: list[dict]) -> list[dict]:
+    if not isinstance(value, list):
+        return fallback_cards
+    cards = []
+    for item in value[:6]:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title", "")).strip()
+        copy = str(item.get("copy", "")).strip()
+        if title and copy:
+            cards.append({"title": title[:48], "copy": copy[:160]})
+    return cards or fallback_cards
+
+
+def normalize_buttons(value: object, fallback_buttons: list[str]) -> list[str]:
+    if not isinstance(value, list):
+        return fallback_buttons
+    buttons = [str(item).strip()[:32] for item in value[:3] if str(item).strip()]
+    return buttons or fallback_buttons
+
+
+def apply_ai_result(build: dict, ai_result: dict | None, fallback_template: dict) -> dict:
+    if not ai_result:
+        build["logs"].append("[ai] provider unavailable; used deterministic fallback")
+        return build
+
+    preview = ai_result.get("preview") if isinstance(ai_result.get("preview"), dict) else {}
+    message = str(ai_result.get("message", "")).strip()
+    code = str(ai_result.get("code", "")).strip()
+    logs = ai_result.get("logs") if isinstance(ai_result.get("logs"), list) else []
+
+    build["message"] = message[:500] or build["message"]
+    build["preview"]["title"] = str(preview.get("title", build["preview"]["title"])).strip()[:96]
+    build["preview"]["copy"] = str(preview.get("copy", build["preview"]["copy"])).strip()[:360]
+    build["preview"]["buttons"] = normalize_buttons(preview.get("buttons"), fallback_template["buttons"])
+    build["preview"]["cards"] = normalize_cards(preview.get("cards"), fallback_template["cards"])
+    if code:
+        build["code"] = code[:9000]
+
+    clean_logs = [str(item).strip()[:240] for item in logs if str(item).strip()]
+    build["logs"].extend([f"[ai] {item}" for item in clean_logs[:8]])
+    build["logs"].append("[ai] model response applied to preview and code")
+    return build
+
+
+def ai_system_prompt() -> str:
+    return """
+You are the backend agent runtime for an Atoms-style app builder.
+The user describes an app. Generate a realistic interactive app preview and React code.
+
+Return only valid JSON with this exact shape:
+{
+  "message": "short Chinese assistant response",
+  "preview": {
+    "title": "preview hero title",
+    "copy": "Chinese summary based on the user request",
+    "buttons": ["primary action", "secondary action"],
+    "cards": [
+      {"title": "feature name", "copy": "short Chinese feature description"}
+    ]
+  },
+  "code": "React JSX code string for the generated app",
+  "logs": ["planner log", "coder log", "verifier log"]
+}
+
+Rules:
+- Keep the generated app concrete and useful.
+- Do not include markdown fences.
+- The code should be displayable as source in a demo. It does not need external packages.
+- Include Planner, Coder, and Verifier behavior in logs.
+""".strip()
+
+
+async def call_ai_provider(prompt: str, template: dict, mode: BuildMode, history: list[dict[str, str]]) -> dict | None:
+    if not AI_API_BASE_URL or not AI_API_KEY:
+        return None
+
+    endpoint = f"{AI_API_BASE_URL}/chat/completions"
+    compact_history = [
+        {"role": item.get("role", "user"), "content": item.get("content", "")[:800]}
+        for item in history[-8:]
+        if item.get("content")
+    ]
+    user_payload = {
+        "prompt": prompt,
+        "mode": mode,
+        "starterTemplate": {
+            "name": template["name"],
+            "summary": template["summary"],
+            "currentCards": template["cards"],
+        },
+    }
+
+    body = {
+        "model": AI_MODEL,
+        "temperature": 0.45 if mode == "fast" else 0.7,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": ai_system_prompt()},
+            *compact_history,
+            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+        ],
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=AI_TIMEOUT_SECONDS) as client:
+            response = await client.post(
+                endpoint,
+                headers={"Authorization": f"Bearer {AI_API_KEY}", "Content-Type": "application/json"},
+                json=body,
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except Exception:
+        return None
+
+    content = (
+        payload.get("choices", [{}])[0]
+        .get("message", {})
+        .get("content", "")
+    )
+    if not content:
+        return None
+    return extract_json_object(content)
+
+
+async def make_build(
+    prompt: str,
+    template_id: TemplateId,
+    mode: BuildMode,
+    source: str = "chat",
+    history: list[dict[str, str]] | None = None,
+) -> dict:
     resolved_template_id = detect_template(prompt, template_id)
     template = TEMPLATES[resolved_template_id]
     build_id = f"build_{uuid.uuid4().hex[:10]}"
@@ -190,6 +354,8 @@ def make_build(prompt: str, template_id: TemplateId, mode: BuildMode, source: st
         "code": generated_code(template, prompt or template["copy"], mode),
         "logs": logs,
     }
+    ai_result = await call_ai_provider(prompt, template, mode, history or [])
+    build = apply_ai_result(build, ai_result, template)
     BUILDS[build_id] = build
     return build
 
@@ -229,18 +395,18 @@ def list_projects() -> dict:
 
 
 @app.post("/api/builds")
-def create_build(request: BuildRequest) -> dict:
-    build = make_build(request.prompt, request.template_id, request.mode)
+async def create_build(request: BuildRequest) -> dict:
+    build = await make_build(request.prompt, request.template_id, request.mode, history=request.history)
     return {"build": build}
 
 
 @app.post("/api/builds/rerun")
-def rerun_build(request: RerunRequest) -> dict:
+async def rerun_build(request: RerunRequest) -> dict:
     previous = BUILDS.get(request.build_id)
     if not previous:
         raise HTTPException(status_code=404, detail="Build not found")
     prompt = request.instruction or f"重新运行 {previous['preview']['name']}，保持当前功能但优化视觉层级。"
-    build = make_build(prompt, previous["templateId"], request.mode, source="rerun")
+    build = await make_build(prompt, previous["templateId"], request.mode, source="rerun")
     return {"build": build}
 
 

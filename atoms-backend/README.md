@@ -29,3 +29,19 @@ Set `FRONTEND_ORIGIN` to your Vercel URL after deployment, for example:
 ```bash
 FRONTEND_ORIGIN=https://your-app.vercel.app
 ```
+
+## AI provider
+
+The backend can call any OpenAI-compatible chat completions API.
+
+Set these environment variables in Hugging Face:
+
+```bash
+AI_API_BASE_URL=https://api.openai.com/v1
+AI_API_KEY=your_api_key
+AI_MODEL=gpt-4o-mini
+```
+
+For another compatible provider, keep the same `/chat/completions` API shape and change `AI_API_BASE_URL`.
+
+If these variables are not set, the backend still works with deterministic demo output.
