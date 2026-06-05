@@ -1,0 +1,110 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Atoms Demo 简要说明文档</title>
+  <style>
+    body { font-family: "Microsoft YaHei", Arial, sans-serif; line-height: 1.65; color: #1f2933; }
+    h1 { font-size: 24px; }
+    h2 { font-size: 18px; margin-top: 24px; }
+    h3 { font-size: 15px; margin-top: 18px; }
+    code { background: #f2f2f2; padding: 2px 5px; border-radius: 4px; }
+    ul { margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Atoms Demo 简要说明文档</h1>
+
+  <h2>一、项目简介</h2>
+  <p>
+    本项目是一个类似 Atoms 的智能体驱动应用生成 demo。用户通过类 GPT 的 Builder 界面输入项目想法，
+    系统会逐步追问网站目标、视觉风格、页面内容和核心功能，然后调用后端 AI 接口生成网页预览、代码文件结构和构建日志。
+  </p>
+
+  <h2>二、实现思路与关键取舍</h2>
+  <h3>1. 前后端分离</h3>
+  <p>
+    前端使用 React + Vite，部署在 Vercel；后端使用 FastAPI，部署在 Hugging Face Docker Space。
+    这种拆分便于分别部署静态前端和 API 服务，也方便后续扩展 AI 调用、项目生成和导出逻辑。
+  </p>
+
+  <h3>2. 交互流程</h3>
+  <p>
+    初始界面只显示左侧 Projects 和中间 Builder。Projects 初始为空，只有用户完成一次生成后才出现项目。
+    Builder 采用分阶段提问方式，先确认项目目标，再确认视觉风格，最后确认页面内容和功能范围。
+    完成需求收集后才展示右侧 Preview 工作区。
+  </p>
+
+  <h3>3. AI 生成方式</h3>
+  <p>
+    后端通过 OpenAI-compatible <code>/chat/completions</code> 接口调用模型，并要求模型返回结构化 JSON。
+    结构化结果包括 preview、代码、日志、文件列表等。这样前端可以稳定渲染，而不是直接解析自由文本。
+  </p>
+
+  <h3>4. Preview 与 Code 的取舍</h3>
+  <p>
+    当前 Preview 不是直接运行生成项目，而是用 AI 返回的结构化页面数据渲染一个可视化预览。
+    Code 视图则展示生成文件树，包括 Markdown、JSON、HTML、JSX、CSS 等文件。
+    这种方式实现成本较低，适合 demo 展示，但距离真实在线 IDE 和完整应用运行环境还有差距。
+  </p>
+
+  <h2>三、当前完成程度</h2>
+  <h3>已完成</h3>
+  <ul>
+    <li>前端和后端项目拆分。</li>
+    <li>Vercel 前端部署配置。</li>
+    <li>Hugging Face Docker 后端部署配置。</li>
+    <li>GitHub Actions 自动同步后端到 Hugging Face Space。</li>
+    <li>Builder 分阶段需求收集。</li>
+    <li>OpenAI-compatible AI 调用接口。</li>
+    <li>AI 调用状态诊断和日志展示。</li>
+    <li>Preview 页面渲染。</li>
+    <li>Code 文件树视图，支持查看 README、JSON、frontend 文件等。</li>
+    <li>Logs 构建日志视图。</li>
+    <li>导出 zip、重新运行、移动端预览、发布状态模拟。</li>
+    <li>Enter 发送，Shift + Enter 换行。</li>
+  </ul>
+
+  <h3>尚未完成或仍是 demo 级别</h3>
+  <ul>
+    <li>代码生成目前主要包含网页前端代码，尚未生成完整后端业务逻辑。</li>
+    <li>生成内容丰富度有限，页面数量、组件深度和业务细节仍可提升。</li>
+    <li>Preview 是结构化数据驱动的模拟预览，不是真正运行生成项目后的沙箱预览。</li>
+    <li>用户交互仍然较线性，尚不支持复杂多轮局部修改和组件级编辑。</li>
+    <li>发布功能目前是状态模拟，不是真实部署生成应用。</li>
+  </ul>
+
+  <h2>四、后续扩展计划与优先级</h2>
+  <h3>优先级 1：增强生成质量和交互能力</h3>
+  <ul>
+    <li>让 AI 生成更完整的多文件前端项目，包括 routes、components、mock data、styles。</li>
+    <li>增加 JSON schema 校验和代码语法校验，失败时自动要求模型修复。</li>
+    <li>支持基于当前项目的增量修改，例如“添加登录页”“把首页改成深色风格”。</li>
+  </ul>
+
+  <h3>优先级 2：升级后端生成能力</h3>
+  <ul>
+    <li>生成真实后端 API，例如 FastAPI 或 Node 服务。</li>
+    <li>生成数据库 schema、鉴权逻辑和接口文档。</li>
+    <li>支持前后端联动预览，展示更接近真实应用的效果。</li>
+  </ul>
+
+  <h3>优先级 3：接近真实 Atoms 工作区</h3>
+  <ul>
+    <li>增加在线运行沙箱，将生成项目构建后通过 iframe 展示。</li>
+    <li>增加文件编辑、版本历史、回滚和 diff 对比。</li>
+    <li>增加组件级交互，点击预览中的元素后可让 AI 定向修改。</li>
+    <li>接入真实发布流程，把生成项目部署成独立可访问 URL。</li>
+  </ul>
+
+  <h2>五、部署说明摘要</h2>
+  <p>
+    前端部署在 Vercel，项目根目录可选择仓库根目录或 <code>atoms-frontend</code>。
+    需要配置 <code>VITE_API_BASE_URL</code> 指向 Hugging Face Space 的公开 API 地址。
+  </p>
+  <p>
+    后端部署在 Hugging Face Docker Space，需要配置 <code>FRONTEND_ORIGIN</code>、<code>AI_API_BASE_URL</code>、
+    <code>AI_API_KEY</code> 和 <code>AI_MODEL</code>。
+  </p>
+</body>
+</html>
