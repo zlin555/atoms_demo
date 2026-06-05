@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import "./styles.css";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:7860";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:7860").replace(/\/$/, "");
 
 const fallbackTemplates = [
   {
@@ -68,9 +68,6 @@ const fallbackTemplates = [
 ];
 
 const fallbackProjects = [
-  { id: "crm-sprint", name: "AI CRM Sprint", templateId: "crm", updated: "Now" },
-  { id: "finops-board", name: "FinOps Board", templateId: "shop", updated: "2h" },
-  { id: "docs-portal", name: "Docs Portal", templateId: "learn", updated: "1d" },
 ];
 
 function buildLocalCode(build) {
@@ -140,8 +137,10 @@ function App() {
     return seed;
   });
   const [messages, setMessages] = useState([
-    { id: "welcome", role: "assistant", text: "你好，我是构建智能体。描述你想做的项目，我会生成页面结构、核心交互、预览和代码片段。" },
+    { id: "welcome", role: "assistant", text: "你好，我是构建智能体。先告诉我你想做什么网站或应用，我会逐步确认风格、页面内容和核心功能，然后生成预览与代码。" },
   ]);
+  const [intake, setIntake] = useState({ phase: "idea", idea: "", style: "", content: "" });
+  const [showPreview, setShowPreview] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [tab, setTab] = useState("preview");
   const [mobile, setMobile] = useState(false);
@@ -161,7 +160,7 @@ function App() {
     Promise.all([api("/api/templates"), api("/api/projects")])
       .then(([templateData, projectData]) => {
         setTemplates(templateData.templates);
-        setProjects(projectData.projects);
+        setProjects([]);
         setApiReady(true);
       })
       .catch(() => setApiReady(false));
@@ -200,10 +199,12 @@ function App() {
     });
   }
 
-  async function createBuild(text, templateId = activeTemplateId) {
+  async function createBuild(text, templateId = activeTemplateId, appendUserMessage = true) {
     const userText = text.trim();
     if (!userText) return;
-    setMessages((items) => [...items, { id: crypto.randomUUID(), role: "user", text: userText }]);
+    if (appendUserMessage) {
+      setMessages((items) => [...items, { id: crypto.randomUUID(), role: "user", text: userText }]);
+    }
     setPrompt("");
     setBuildState("Building");
 
@@ -223,7 +224,16 @@ function App() {
       const nextBuild = data.build;
       setBuild(nextBuild);
       setActiveTemplateId(nextBuild.templateId);
+      setShowPreview(true);
       animateBuild(nextBuild);
+      const project = {
+        id: nextBuild.id,
+        name: nextBuild.preview.name || "Generated Project",
+        templateId: nextBuild.templateId,
+        updated: "Now",
+      };
+      setProjects((items) => [project, ...items.filter((item) => item.id !== project.id)]);
+      setActiveProjectId(project.id);
       setMessages((items) => [
         ...items,
         {
@@ -240,6 +250,54 @@ function App() {
         { id: crypto.randomUUID(), role: "assistant", text: `后端暂时不可用：${error.message}` },
       ]);
     }
+  }
+
+  function handleGuidedSubmit(text) {
+    const userText = text.trim();
+    if (!userText) return;
+
+    setMessages((items) => [...items, { id: crypto.randomUUID(), role: "user", text: userText }]);
+    setPrompt("");
+
+    if (intake.phase === "idea") {
+      setIntake({ phase: "style", idea: userText, style: "", content: "" });
+      setMessages((items) => [
+        ...items,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          text: "好的。你希望这个项目是什么视觉风格？例如：极简专业、深色科技感、活泼插画风、企业级后台、移动端优先，或者你可以描述参考网站。",
+        },
+      ]);
+      return;
+    }
+
+    if (intake.phase === "style") {
+      setIntake((current) => ({ ...current, phase: "content", style: userText }));
+      setMessages((items) => [
+        ...items,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          text: "收到。接下来请告诉我需要哪些页面和内容模块，比如首页、价格页、登录页、仪表盘、表单、列表、图表、文案重点或数据字段。",
+        },
+      ]);
+      return;
+    }
+
+    if (intake.phase === "content") {
+      const fullPrompt = [
+        `项目目标：${intake.idea}`,
+        `视觉风格：${intake.style}`,
+        `页面与内容：${userText}`,
+        "请生成适合前端展示的 preview、React 代码、构建日志，并体现 Planner、Coder、Verifier 的构建过程。",
+      ].join("\n");
+      setIntake((current) => ({ ...current, phase: "done", content: userText }));
+      createBuild(fullPrompt, activeTemplateId, false);
+      return;
+    }
+
+    createBuild(userText);
   }
 
   async function rerun() {
@@ -322,7 +380,7 @@ function App() {
   const logText = (build.logs || []).join("\n");
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${showPreview ? "with-preview" : "builder-only"}`}>
       <aside className="sidebar" aria-label="项目导航">
         <div className="brand">
           <div className="logo">
@@ -338,7 +396,9 @@ function App() {
         <section className="side-section">
           <h2 className="section-title">Projects</h2>
           <div className="project-list">
-            {projects.map((project) => (
+            {projects.length === 0 ? (
+              <div className="empty-projects">还没有项目。完成一次构建后会出现在这里。</div>
+            ) : projects.map((project) => (
               <button
                 key={project.id}
                 className={`nav-item ${activeProjectId === project.id ? "active" : ""}`}
@@ -354,31 +414,6 @@ function App() {
             ))}
           </div>
         </section>
-
-        <section className="side-section">
-          <h2 className="section-title">Starter Kits</h2>
-          <div className="template-list">
-            {templates.map((template) => (
-              <button
-                key={template.id}
-                className={`template ${activeTemplateId === template.id ? "active" : ""}`}
-                type="button"
-                onClick={() => selectTemplate(template.id)}
-              >
-                <strong>{template.name}</strong>
-                <span>{template.summary}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <div className="sidebar-footer">
-          <div className="deploy-card">
-            <strong>Build Budget</strong>
-            <div className="meter" aria-label="本周构建额度"><span /></div>
-            <p className="tiny">68% tokens and preview minutes used</p>
-          </div>
-        </div>
       </aside>
 
       <section className="chat" aria-label="智能体构建对话">
@@ -396,17 +431,17 @@ function App() {
           </div>
         </header>
 
-        <div className="agents">
-          {["Planner", "Coder", "Verifier"].map((agent, index) => (
+        <div className={`agents ${showPreview ? "" : "compact-agents"}`}>
+          {["Idea", "Style", "Scope"].map((agent, index) => (
             <div
               key={agent}
-              className={`agent ${activeAgentIndex === index && buildState === "Building" ? "running" : ""} ${activeAgentIndex > index || buildState === "Ready" || buildState === "Published" ? "done" : ""}`}
+              className={`agent ${["idea", "style", "content"][index] === intake.phase ? "running" : ""} ${index < ["idea", "style", "content", "done"].indexOf(intake.phase) ? "done" : ""}`}
             >
               <div className="agent-head">
                 <span>{agent}</span>
                 <span className="agent-state" />
               </div>
-              <p>{index === 0 ? "拆解需求、定义页面和数据流。" : index === 1 ? "生成组件、状态和交互逻辑。" : "检查布局、空状态和发布风险。"}</p>
+              <p>{index === 0 ? "确认产品目标。" : index === 1 ? "确认视觉方向。" : "确认页面和内容。"}</p>
             </div>
           ))}
         </div>
@@ -436,18 +471,18 @@ function App() {
           ))}
         </div>
 
-        <form className="composer" onSubmit={(event) => { event.preventDefault(); createBuild(prompt); }}>
+        <form className="composer" onSubmit={(event) => { event.preventDefault(); handleGuidedSubmit(prompt); }}>
           <div className="input-wrap">
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
-              placeholder="例如：帮我构建一个面向销售团队的客户管理 SaaS，包含 pipeline、任务提醒和数据分析。"
+              placeholder={intake.phase === "idea" ? "例如：我想做一个帮助学生整理课程笔记的网站。" : intake.phase === "style" ? "例如：极简、专业、偏白色背景，适合大学生使用。" : "例如：首页、登录页、笔记列表、AI 总结页、标签筛选和导出功能。"}
             />
             <button className="send" type="submit" title="发送"><ArrowUp size={20} /></button>
           </div>
           <div className="quick-row" aria-label="快捷需求">
-            {["生成登录和权限", "添加数据看板", "接入发布流程"].map((item) => (
-              <button key={item} className="chip" type="button" onClick={() => setPrompt(`${item}，并同步更新右侧预览。`)}>
+            {(intake.phase === "idea" ? ["SaaS 后台", "作品集网站", "AI 学习工具"] : intake.phase === "style" ? ["极简专业", "深色科技", "清爽教育风"] : ["首页和登录", "Dashboard 和表格", "表单和图表"]).map((item) => (
+              <button key={item} className="chip" type="button" onClick={() => setPrompt(item)}>
                 {item}
               </button>
             ))}
@@ -455,7 +490,7 @@ function App() {
         </form>
       </section>
 
-      <section className="workspace" aria-label="应用预览工作区">
+      {showPreview ? <section className="workspace" aria-label="应用预览工作区">
         <header className="workspace-head">
           <div className="title-block">
             <h1>{build.preview.name}</h1>
@@ -502,7 +537,7 @@ function App() {
             <pre className="log-view">{logText}</pre>
           )}
         </div>
-      </section>
+      </section> : null}
 
       <div className={`toast ${toast ? "show" : ""}`} role="status" aria-live="polite">{toast}</div>
     </main>
