@@ -98,6 +98,11 @@ AI_API_BASE_URL = os.getenv("AI_API_BASE_URL", "").rstrip("/")
 AI_API_KEY = os.getenv("AI_API_KEY", "")
 AI_MODEL = os.getenv("AI_MODEL", "gpt-4o-mini")
 AI_TIMEOUT_SECONDS = float(os.getenv("AI_TIMEOUT_SECONDS", "40"))
+AI_STATUS = {
+    "enabled": bool(AI_API_BASE_URL and AI_API_KEY),
+    "last_ok": False,
+    "last_error": "",
+}
 
 
 def now_iso() -> str:
@@ -189,8 +194,15 @@ def normalize_buttons(value: object, fallback_buttons: list[str]) -> list[str]:
 
 
 def apply_ai_result(build: dict, ai_result: dict | None, fallback_template: dict) -> dict:
+    build["ai"] = {
+        "enabled": AI_STATUS["enabled"],
+        "used": bool(ai_result),
+        "model": AI_MODEL if AI_STATUS["enabled"] else "",
+        "lastError": AI_STATUS["last_error"],
+    }
     if not ai_result:
-        build["logs"].append("[ai] provider unavailable; used deterministic fallback")
+        reason = AI_STATUS["last_error"] or "AI_API_BASE_URL or AI_API_KEY is not configured"
+        build["logs"].append(f"[ai] provider unavailable; used deterministic fallback; reason={reason}")
         return build
 
     preview = ai_result.get("preview") if isinstance(ai_result.get("preview"), dict) else {}
@@ -210,6 +222,12 @@ def apply_ai_result(build: dict, ai_result: dict | None, fallback_template: dict
     build["logs"].extend([f"[ai] {item}" for item in clean_logs[:8]])
     build["logs"].append("[ai] model response applied to preview and code")
     return build
+
+
+def chat_completions_endpoint() -> str:
+    if AI_API_BASE_URL.endswith("/chat/completions"):
+        return AI_API_BASE_URL
+    return f"{AI_API_BASE_URL}/chat/completions"
 
 
 def ai_system_prompt() -> str:
@@ -242,9 +260,14 @@ Rules:
 
 async def call_ai_provider(prompt: str, template: dict, mode: BuildMode, history: list[dict[str, str]]) -> dict | None:
     if not AI_API_BASE_URL or not AI_API_KEY:
+        AI_STATUS["enabled"] = False
+        AI_STATUS["last_ok"] = False
+        AI_STATUS["last_error"] = "AI_API_BASE_URL or AI_API_KEY is missing"
         return None
 
-    endpoint = f"{AI_API_BASE_URL}/chat/completions"
+    AI_STATUS["enabled"] = True
+    AI_STATUS["last_error"] = ""
+    endpoint = chat_completions_endpoint()
     compact_history = [
         {"role": item.get("role", "user"), "content": item.get("content", "")[:800]}
         for item in history[-8:]
@@ -280,7 +303,14 @@ async def call_ai_provider(prompt: str, template: dict, mode: BuildMode, history
             )
             response.raise_for_status()
             payload = response.json()
-    except Exception:
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text[:500] if exc.response is not None else ""
+        AI_STATUS["last_ok"] = False
+        AI_STATUS["last_error"] = f"HTTP {exc.response.status_code if exc.response else 'unknown'} from AI provider: {detail}"
+        return None
+    except Exception as exc:
+        AI_STATUS["last_ok"] = False
+        AI_STATUS["last_error"] = f"{type(exc).__name__}: {str(exc)[:500]}"
         return None
 
     content = (
@@ -289,8 +319,17 @@ async def call_ai_provider(prompt: str, template: dict, mode: BuildMode, history
         .get("content", "")
     )
     if not content:
+        AI_STATUS["last_ok"] = False
+        AI_STATUS["last_error"] = "AI provider returned an empty message"
         return None
-    return extract_json_object(content)
+    parsed = extract_json_object(content)
+    if not parsed:
+        AI_STATUS["last_ok"] = False
+        AI_STATUS["last_error"] = "AI provider response was not valid JSON"
+        return None
+    AI_STATUS["last_ok"] = True
+    AI_STATUS["last_error"] = ""
+    return parsed
 
 
 async def make_build(
@@ -382,6 +421,19 @@ def root() -> dict:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "time": now_iso()}
+
+
+@app.get("/api/ai/status")
+def ai_status() -> dict:
+    return {
+        "enabled": bool(AI_API_BASE_URL and AI_API_KEY),
+        "baseUrl": AI_API_BASE_URL,
+        "endpoint": chat_completions_endpoint() if AI_API_BASE_URL else "",
+        "model": AI_MODEL,
+        "hasKey": bool(AI_API_KEY),
+        "lastOk": AI_STATUS["last_ok"],
+        "lastError": AI_STATUS["last_error"],
+    }
 
 
 @app.get("/api/templates")

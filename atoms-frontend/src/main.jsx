@@ -377,7 +377,10 @@ function App() {
     selectTemplate(project.templateId);
   }
 
-  const logText = (build.logs || []).join("\n");
+  const aiLog = build.ai
+    ? `[ai-status] enabled=${build.ai.enabled} used=${build.ai.used} model=${build.ai.model || "none"}${build.ai.lastError ? ` error=${build.ai.lastError}` : ""}`
+    : "[ai-status] unknown";
+  const logText = [aiLog, ...(build.logs || [])].join("\n");
 
   return (
     <main className={`app-shell ${showPreview ? "with-preview" : "builder-only"}`}>
