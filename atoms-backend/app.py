@@ -193,6 +193,28 @@ def normalize_buttons(value: object, fallback_buttons: list[str]) -> list[str]:
     return buttons or fallback_buttons
 
 
+def normalize_list(value: object, fallback: list[str], limit: int = 6, item_limit: int = 48) -> list[str]:
+    if not isinstance(value, list):
+        return fallback
+    items = [str(item).strip()[:item_limit] for item in value[:limit] if str(item).strip()]
+    return items or fallback
+
+
+def normalize_sections(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    sections = []
+    for item in value[:5]:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title", "")).strip()
+        copy = str(item.get("copy", "")).strip()
+        bullets = normalize_list(item.get("bullets"), [], limit=4, item_limit=80)
+        if title and copy:
+            sections.append({"title": title[:56], "copy": copy[:220], "bullets": bullets})
+    return sections
+
+
 def apply_ai_result(build: dict, ai_result: dict | None, fallback_template: dict) -> dict:
     build["ai"] = {
         "enabled": AI_STATUS["enabled"],
@@ -215,6 +237,10 @@ def apply_ai_result(build: dict, ai_result: dict | None, fallback_template: dict
     build["preview"]["copy"] = str(preview.get("copy", build["preview"]["copy"])).strip()[:360]
     build["preview"]["buttons"] = normalize_buttons(preview.get("buttons"), fallback_template["buttons"])
     build["preview"]["cards"] = normalize_cards(preview.get("cards"), fallback_template["cards"])
+    build["preview"]["theme"] = str(preview.get("theme", "light")).strip()[:24] or "light"
+    build["preview"]["nav"] = normalize_list(preview.get("nav"), ["Home", "Dashboard", "Settings"], limit=5)
+    build["preview"]["metrics"] = normalize_cards(preview.get("metrics"), [])
+    build["preview"]["sections"] = normalize_sections(preview.get("sections"))
     if code:
         build["code"] = code[:9000]
 
@@ -241,9 +267,17 @@ Return only valid JSON with this exact shape:
   "preview": {
     "title": "preview hero title",
     "copy": "Chinese summary based on the user request",
+    "theme": "light | dark | minimal | playful | enterprise",
+    "nav": ["nav item"],
     "buttons": ["primary action", "secondary action"],
+    "metrics": [
+      {"title": "metric label", "copy": "metric value or short status"}
+    ],
     "cards": [
       {"title": "feature name", "copy": "short Chinese feature description"}
+    ],
+    "sections": [
+      {"title": "page section", "copy": "what this section contains", "bullets": ["detail"]}
     ]
   },
   "code": "React JSX code string for the generated app",
@@ -252,6 +286,8 @@ Return only valid JSON with this exact shape:
 
 Rules:
 - Keep the generated app concrete and useful.
+- Make the preview visibly different for different user requests, not just rewritten text.
+- Use nav, metrics, cards, and sections to describe the generated page structure.
 - Do not include markdown fences.
 - The code should be displayable as source in a demo. It does not need external packages.
 - Include Planner, Coder, and Verifier behavior in logs.

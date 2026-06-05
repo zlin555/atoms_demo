@@ -479,6 +479,12 @@ function App() {
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  handleGuidedSubmit(prompt);
+                }
+              }}
               placeholder={intake.phase === "idea" ? "例如：我想做一个帮助学生整理课程笔记的网站。" : intake.phase === "style" ? "例如：极简、专业、偏白色背景，适合大学生使用。" : "例如：首页、登录页、笔记列表、AI 总结页、标签筛选和导出功能。"}
             />
             <button className="send" type="submit" title="发送"><ArrowUp size={20} /></button>
@@ -548,14 +554,27 @@ function App() {
 }
 
 function PreviewApp({ build, mobile }) {
+  const preview = build.preview || {};
+  const nav = preview.nav || [];
+  const metrics = preview.metrics || [];
+  const sections = preview.sections || [];
+
   return (
-    <div className={`preview-app ${mobile ? "mobile" : ""}`}>
+    <div className={`preview-app ${mobile ? "mobile" : ""} theme-${preview.theme || "light"}`}>
+      {nav.length ? (
+        <nav className="generated-nav">
+          <strong>{preview.name || build.preview.name}</strong>
+          <div>
+            {nav.map((item) => <span key={item}>{item}</span>)}
+          </div>
+        </nav>
+      ) : null}
       <section className="preview-hero">
         <div>
-          <h2>{build.preview.title}</h2>
-          <p>{build.preview.copy}</p>
+          <h2>{preview.title}</h2>
+          <p>{preview.copy}</p>
           <div className="preview-buttons">
-            {(build.preview.buttons || []).map((button, index) => (
+            {(preview.buttons || []).map((button, index) => (
               <button key={button} className={`mock-btn ${index > 0 ? "alt" : ""}`} type="button">
                 {button}
               </button>
@@ -573,14 +592,39 @@ function PreviewApp({ build, mobile }) {
           <div className="visual-line mid" />
         </div>
       </section>
+      {metrics.length ? (
+        <section className="metrics-grid">
+          {metrics.map((metric) => (
+            <div className="metric-card" key={metric.title}>
+              <span>{metric.title}</span>
+              <b>{metric.copy}</b>
+            </div>
+          ))}
+        </section>
+      ) : null}
       <section className="preview-content">
-        {(build.preview.cards || []).map((card) => (
+        {(preview.cards || []).map((card) => (
           <div className="preview-card" key={card.title}>
             <b>{card.title}</b>
             <span>{card.copy}</span>
           </div>
         ))}
       </section>
+      {sections.length ? (
+        <section className="generated-sections">
+          {sections.map((section) => (
+            <article className="generated-section" key={section.title}>
+              <h3>{section.title}</h3>
+              <p>{section.copy}</p>
+              {section.bullets?.length ? (
+                <ul>
+                  {section.bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}
+                </ul>
+              ) : null}
+            </article>
+          ))}
+        </section>
+      ) : null}
       <section className="preview-strip">
         <div><Bot size={16} />Agent generated</div>
         <div><Box size={16} />Componentized</div>
